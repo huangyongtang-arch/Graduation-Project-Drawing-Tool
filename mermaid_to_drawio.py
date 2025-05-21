@@ -15,27 +15,35 @@ def parse_mermaid_flowchart(mermaid_code: str) -> tuple[list[dict], list[dict]]:
         - The first list contains dictionaries for nodes (id, label, shape).
         - The second list contains dictionaries for edges (source, target, label).
     """
+    # Initialize lists for nodes and edges
     nodes = []
     edges = []
     
+    # Regular expression pattern for matching nodes
     node_pattern = re.compile(r"^\s*([\w]+)(?:\[(.*?)\]|\{(.*?)\}|\((.*?)\))?\s*(?:;)?\s*$")
     
+    # Regular expression patterns for matching different types of edges
     edge_pattern = re.compile(r"^\s*([\w]+)\s*---+--\s*([\w]+)\s*$") 
     edge_with_arrow_pattern = re.compile(r"^\s*([\w]+)\s*--+>\s*([\w]+)\s*$")
     edge_with_label_pattern = re.compile(r"^\s*([\w]+)\s*--\s*(.*?)\s*--\s*([\w]+)\s*$")
     edge_with_label_and_arrow_pattern = re.compile(r"^\s*([\w]+)\s*--\s*(.*?)\s*--+>\s*([\w]+)\s*$")
 
+    # Sets for storing node IDs and processed node definitions to avoid duplicates
     node_ids = set()
     processed_node_definitions = set()
 
+    # Split the input Mermaid code into lines
     lines = mermaid_code.strip().split('\n')
 
+    # Process each line to extract nodes and edges
     for line in lines:
         line = line.strip()
 
+        # Skip lines that define the graph or flowchart orientation
         if line.lower().startswith("graph") or line.lower().startswith("flowchart"):
             continue
 
+        # Check and process edges with labels and/or arrows
         matched_edge = False
         match = edge_with_label_and_arrow_pattern.match(line)
         if match:
@@ -68,20 +76,24 @@ def parse_mermaid_flowchart(mermaid_code: str) -> tuple[list[dict], list[dict]]:
                         node_ids.add(source)
                         node_ids.add(target)
                         matched_edge = True
-        
+
+        # Continue to the next line if an edge has been processed
         if matched_edge:
             continue
 
+        # Process nodes with different shapes
         match = node_pattern.match(line)
         if match:
             node_id, rect_label, rhomb_label, stadium_label = match.groups()
             
+            # Skip processing if the node has already been defined
             if node_id in processed_node_definitions:
                 continue
 
             label = node_id 
             shape = 'default' 
 
+            # Determine the shape of the node based on the label format
             if rect_label is not None:
                 label = rect_label.strip()
                 shape = 'rectangle'
@@ -92,6 +104,7 @@ def parse_mermaid_flowchart(mermaid_code: str) -> tuple[list[dict], list[dict]]:
                 label = stadium_label.strip()
                 shape = 'stadium'
             
+            # Update or add the node information
             existing_node = next((n for n in nodes if n['id'] == node_id), None)
             if existing_node:
                 existing_node['label'] = label
@@ -102,10 +115,12 @@ def parse_mermaid_flowchart(mermaid_code: str) -> tuple[list[dict], list[dict]]:
             processed_node_definitions.add(node_id)
             node_ids.add(node_id)
 
+    # Add default nodes for any node IDs mentioned in edges but not defined as nodes
     for node_id_in_edge in node_ids:
         if not any(n['id'] == node_id_in_edge for n in nodes):
             nodes.append({'id': node_id_in_edge, 'label': node_id_in_edge, 'shape': 'default'})
             
+    # Return the extracted nodes and edges
     return nodes, edges
 
 def generate_drawio_xml(nodes: list[dict], edges: list[dict]) -> str:
@@ -119,29 +134,42 @@ def generate_drawio_xml(nodes: list[dict], edges: list[dict]) -> str:
     Returns:
         A string containing the Draw.io XML.
     """
+    # Create the root element of the Draw.io XML
     mxfile = ET.Element("mxfile", compressed="false", host="app.diagrams.net")
+    
+    # Create the diagram element
     diagram = ET.SubElement(mxfile, "diagram", id="Diagram1", name="Page-1")
+    
+    # Create the mxGraphModel element with default settings
     mx_graph_model = ET.SubElement(diagram, "mxGraphModel", dx="1000", dy="800", grid="1", gridSize="10", guides="1", tooltips="1", connect="1", arrows="1", fold="1", page="1", pageScale="1", pageWidth="850", pageHeight="1100", math="0", shadow="0")
+    
+    # Create the root element for cells (nodes and edges)
     root = ET.SubElement(mx_graph_model, "root")
     
+    # Create the first two default mxCell elements
     ET.SubElement(root, "mxCell", id="0")
     ET.SubElement(root, "mxCell", id="1", parent="0")
 
+    # Dictionary to store the mapping of node IDs to XML IDs
     xml_node_ids = {} 
+    # Counter for generating unique cell IDs
     cell_id_counter = 2 
 
+    # Initial position and spacing for nodes
     node_x_position = 50
     node_y_position = 50 
     node_spacing_x = 150 
     node_width = 120
     node_height = 60
 
+    # Iterate through nodes to create node elements
     for i, node in enumerate(nodes):
         xml_id = str(cell_id_counter)
         xml_node_ids[node['id']] = xml_id
         cell_id_counter += 1
 
         style = ""
+        # Determine the style based on the node shape
         if node['shape'] == 'rectangle':
             style = "rounded=0;whiteSpace=wrap;html=1;"
         elif node['shape'] == 'rhombus':
@@ -153,6 +181,7 @@ def generate_drawio_xml(nodes: list[dict], edges: list[dict]) -> str:
         else: 
             style = "rounded=0;whiteSpace=wrap;html=1;"
 
+        # Create the node cell element
         node_cell = ET.SubElement(root, "mxCell", 
                                   id=xml_id, 
                                   value=node['label'], 
@@ -160,16 +189,20 @@ def generate_drawio_xml(nodes: list[dict], edges: list[dict]) -> str:
                                   parent="1", 
                                   vertex="1")
         
+        # Calculate the position of the node
         current_x = str(node_x_position + (i * node_spacing_x))
         current_y = str(node_y_position)
 
-        ET.SubElement(node_cell, "mxGeometry", 
-                      x=current_x, 
-                      y=current_y, 
-                      width=str(node_width), 
-                      height=str(node_height), 
-                      as="geometry")
+        # Create the mxGeometry element for the node
+        ET.SubElement(node_cell, "mxGeometry", attrib={ # 将属性明确放入 attrib 字典
+            "x": current_x,
+            "y": current_y,
+            "width": str(node_width),
+            "height": str(node_height),
+            "as": "geometry"
+        })
 
+    # Iterate through edges to create edge elements
     for edge in edges:
         edge_xml_id = str(cell_id_counter)
         cell_id_counter += 1
@@ -177,12 +210,14 @@ def generate_drawio_xml(nodes: list[dict], edges: list[dict]) -> str:
         source_xml_id = xml_node_ids.get(edge['source'])
         target_xml_id = xml_node_ids.get(edge['target'])
 
+        # Check if the source and target XML IDs exist
         if source_xml_id is None or target_xml_id is None:
             print(f"Warning: Could not find XML ID for source/target of edge: {edge}", file=sys.stderr)
             continue 
 
         edge_style = "endArrow=classic;html=1;rounded=0;"
         
+        # Create the edge cell element
         edge_cell = ET.SubElement(root, "mxCell",
                                   id=edge_xml_id,
                                   value=edge['label'], 
@@ -192,10 +227,13 @@ def generate_drawio_xml(nodes: list[dict], edges: list[dict]) -> str:
                                   source=source_xml_id,
                                   target=target_xml_id)
         
-        ET.SubElement(edge_cell, "mxGeometry", relative="1", as="geometry")
+        # Create the mxGeometry element for the edge
+        ET.SubElement(edge_cell, "mxGeometry", attrib={"relative": "1", "as": "geometry"}) # 将属性明确放入 attrib 字典
 
+    # Convert the ElementTree to an XML string
     xml_string = ET.tostring(mxfile, encoding="unicode")
     
+    # Return the generated XML string
     return xml_string
 
 def convert_mermaid_to_drawio_xml(mermaid_code: str) -> str:
@@ -296,4 +334,3 @@ if __name__ == '__main__':
     # output_filename = "output.drawio"
     # save_drawio_xml_to_file(drawio_output_xml, output_filename)
     # print(f"\nDraw.io XML saved to {output_filename}")
-```
